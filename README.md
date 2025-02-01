@@ -16,7 +16,7 @@ Start by cloning the project to your local machine:
 
 ### 2. Install requirements
 
-use pip freeze -r requirements.txt to install the requirements
+use requirements.txt to install the requirements
 
 ### 3. Setup .env
 
