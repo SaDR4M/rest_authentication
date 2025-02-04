@@ -178,8 +178,8 @@ class SignInApiView(APIView):
         response = signin_user(request , user)
         
         # delete OTP cache if it is not expired yet
-        if cache.get(f"OTP_TRY-{mobile}") : 
-            cache.delete(f"OTP_TRY-{mobile}")
+        if cache.get(f"OTP:{mobile}") : 
+            cache.delete(f"OTP:{mobile}")
             
         return response                
 
@@ -237,7 +237,7 @@ class SignUpApiView(APIView):
         response = signup_user(request)
         
         # delete OTP cache if it is not expired yet
-        if cache.get(f"OTP_TRY-{mobile}") : 
-            cache.delete(f"OTP_TRY-{mobile}")
+        if cache.get(f"OTP:{mobile}") : 
+            cache.delete(f"OTP:{mobile}")
             
         return response                
