@@ -1,26 +1,34 @@
-
-# Create your views here.
 # built-in imports
 import re
 import uuid
 # django & rest imports
 from django.contrib.auth.hashers import make_password
-from rest_framework.response import Response
-from rest_framework.views import APIView
-from rest_framework.status import HTTP_200_OK , HTTP_400_BAD_REQUEST , HTTP_404_NOT_FOUND
-from rest_framework.permissions import AllowAny
 from django.core.cache import cache
 from django.contrib.auth.hashers import make_password
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework.status import HTTP_200_OK , HTTP_400_BAD_REQUEST , HTTP_404_NOT_FOUND , HTTP_500_INTERNAL_SERVER_ERROR
+from rest_framework.permissions import AllowAny
+from rest_framework import status
+from rest_framework.permissions import IsAdminUser, IsAuthenticated , AllowAny
+from rest_framework.response import Response
+from rest_framework.views import APIView
 # third party imports
 from icecream import ic
-from drf_yasg import openapi
-from drf_yasg.utils import swagger_auto_schema
 # local imports
 from account.models import User
-from account.utils import  signin_user , signup_user , check_otp
+from account.utils import  (signin_user ,
+                            signup_user ,
+                            check_otp ,
+                            signin_user_wp ,
+                            update_user_password,
+                            validate_user_mobile,
+                            create_otp
+                            )
 from notifications.models import SmsCategory
 from core.send_sms import send_sms
 from core.make_call import make_call
+from account.docs import sign_in_otp_document , sign_up_document, sign_in_pass_document , update_credential_document , otp_document
 
 
 
@@ -30,92 +38,71 @@ class UserOTPApiView(APIView):
     /otp_checker/
     """
     permission_classes = [AllowAny]
-    @swagger_auto_schema(
-        operation_description="Sending OTP to the user mobile",
-        operation_summary="Sending OTP",
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            properties={
-                "mobile" : openapi.Schema(description="user mobile" , type=openapi.TYPE_STRING , minlength=11)
-                # "with_call" : 
-            },
-            required=["mobile"]
-        ),
-        responses={
-            200 : "OTP is sent to the user",
-            400 : "Wrong mobile number format"
-        }
-    )
+    @otp_document
     def post(self, request):
         '''
         send OTP to the user with SMS or CALL
         save the OTP has hash
         '''
         # filtering user
+        # validate user mobile
         mobile = request.data.get("mobile")
-        mobile_validate = re.search("^(0|0098|98|\+98)9(0[1-5]|[1 3]\d|2[0-2]|9[1 8 9])\d{7}$", mobile)
-        if not mobile_validate:
-            response_json = {
-                'succeeded': False,
-                'show': True,
-                'en_detail': 'Mobile is not correct',
-                'fa_detail': 'ساختار شماره تلفن همراه نادرست است',
-            }
-            return Response(response_json, status=HTTP_400_BAD_REQUEST)
+        validated_mobile = validate_user_mobile(mobile)
+        if isinstance(validate_user_mobile , Response) :
+            return validated_mobile
+    
         with_call = False
         if request.data.get("with_call") == 'true':
             with_call = True      
-        otp = str(uuid.uuid4().int)[:5]
+
+        # create otp
+        otp = create_otp(mobile)
+        if isinstance(otp , Response) :
+            return otp
+        
         # TODO Security: Dont send code in response
         req = {
+            "succeeded": True,
             "mobile": mobile,
             "code" : otp,
         }  
 
-        req.update({
-            "succeeded": True,
-        })
-        
-        key = f'OTP:{mobile}'
-        if cache.get(key):  # pass the sms code sending if we already have send an sms to user
-            return Response({
-                "succeeded": False,
-                "remain_time": cache.ttl(key),
-                }, status=HTTP_200_OK)
-            
+        # call for the OTP
         if with_call == True:
             req.update({
                 "send_with" : "CALL"
                 })
             make_call(
-                request.data.get("mobile"),
+                receptor = mobile,
                 message = otp,
             )
+        # send message for OTP
         else:
             # NOTE create sms category objects otherwise it will cause an error
-            sms_category_obj = SmsCategory.objects.filter(code=1).first()
+            # FIXME fix this
+            # sms_category_obj = SmsCategory.objects.filter(code=1).first()
             
-            if sms_category_obj.isActive == True:
-                sms_text = sms_category_obj.smsText.format(otp,otp)
-                send_sms(
-                    request.data.get("mobile"),
-                    sms_text,
-                    sms_category_obj.id,
-                    sms_category_obj.get_sendByNumber_display(),
-                    request.user.id,
-                )
+            # if sms_category_obj.isActive == True:
+            #     sms_text = sms_category_obj.smsText.format(otp,otp)
+            #     send_sms(
+            #         request.data.get("mobile"),
+            #         sms_text,
+            #         sms_category_obj.id,
+            #         sms_category_obj.get_sendByNumber_display(),
+            #         request.user.id,
+            #     )
             req.update({
                 "send_with": 'SMS',
                 })
-        ## TODO remove code from response
+        # TODO remove code from response
         user_exists = User.objects.filter(mobile=mobile).exists()
         req.update({
-            "succeeded": True,
             "user_exists" : user_exists,
             "send_otp": True,
             "remain_time": 60,
         })
         ic(req)
+        # save OTP
         hashed_otp =  make_password(otp)
         cache.set(f'OTP:{mobile}', hashed_otp, 60)
         return Response(req, status=HTTP_200_OK)
@@ -125,35 +112,9 @@ class UserOTPApiView(APIView):
 class SignInApiView(APIView):
     """ 
     authentication view class for normal user , Login and signup
-    /register_login/
     """
     permission_classes = [AllowAny]
-    @swagger_auto_schema(
-        operation_description="Checking the OTP that was sent to user with the entered OTP then Signup/in the user base on the user existence",
-        operation_summary="Signup/in",
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            properties={
-                "mobile" : openapi.Schema(description="user mobile" , type=openapi.TYPE_STRING , minlength=11),
-                "otp" : openapi.Schema(description="otp" , type=openapi.TYPE_STRING , minlength=5),
-            },
-            required=["mobile" , "otp"]
-        ),
-
-        responses={
-            200: openapi.Response(
-            description="user is logged in or signed up",
-            examples={
-                "application/json": {
-                    "succeeded": True,
-                    "Authorization" : "Access token",
-                    "role" : 10
-                    }
-                }
-            ),
-            400 : "Wrong OTP or OTP is expired"
-        }
-    )
+    @sign_in_otp_document
     def post(self,request):
         ''' login/sign up'''
         mobile = request.data.get("mobile")
@@ -162,9 +123,6 @@ class SignInApiView(APIView):
         # if otp is not correct return response
         if isinstance(is_otp_correct , Response) :
             return is_otp_correct
-        # user = User.objects.get(
-        #         mobile = mobile
-        #     )
         try :
             user = User.objects.get(
                 mobile = mobile
@@ -183,41 +141,17 @@ class SignInApiView(APIView):
             
         return response                
 
+
+
+
+
+
 class SignUpApiView(APIView):
     """ 
     authentication view class for normal user , Login and signup
-    /register_login/
     """
     permission_classes = [AllowAny]
-    @swagger_auto_schema(
-        operation_description="Checking the OTP that was sent to user with the entered OTP then Signup the user base on the user existence",
-        operation_summary="Signup/in",
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            properties={
-                "mobile" : openapi.Schema(description="user mobile" , type=openapi.TYPE_STRING , minlength=11),
-                "otp" : openapi.Schema(description="otp" , type=openapi.TYPE_STRING , minlength=5),
-                "birthday" : openapi.Schema(description="user birthday" , type=openapi.TYPE_STRING),
-                "password" : openapi.Schema(description="user password" , type=openapi.TYPE_STRING),
-                "email" : openapi.Schema(description="user email" , type=openapi.TYPE_STRING)
-            },
-            required=["mobile" , "otp" , "birthday"]
-        ),
-
-        responses={
-            200: openapi.Response(
-            description="user is logged in or signed up",
-            examples={
-                "application/json": {
-                    "succeeded": True,
-                    "Authorization" : "Access token",
-                    "role" : 10
-                    }
-                }
-            ),
-            400 : "Wrong OTP or OTP is expired - invalid paramters"
-        }
-    )
+    @sign_up_document
     def post(self,request):
         ''' login/sign up'''
         mobile = request.data.get("mobile")
@@ -226,13 +160,7 @@ class SignUpApiView(APIView):
         # if otp is not correct return response
         if isinstance(is_otp_correct , Response) :
             return is_otp_correct
-        # check again if that user exists or not 
-        user = User.objects.filter(mobile = mobile)
-        if user.exists() :
-            return Response(
-                data={"en_detail" : "user exists" , "fa_detail" : " کاربری با این مشخصات وجود دارد"} , 
-                status=HTTP_400_BAD_REQUEST
-                )
+        
         # sign up the user
         response = signup_user(request)
         
@@ -241,3 +169,61 @@ class SignUpApiView(APIView):
             cache.delete(f"OTP:{mobile}")
             
         return response                
+
+
+
+
+# sign in the user with password
+class SignInWithPassApiView(APIView):
+    """
+    authenticate user with mobile number and the password
+    3 situations may occur
+    1) mobile or password is wrong
+    2) password is not set
+    3) user does not exists
+    """
+    # permission_classes = [IsAdminUser]
+    permission_classes = [AllowAny]
+    @sign_in_pass_document
+    def post(self , request):
+
+        mobile = request.data.get("mobile")
+        password = request.data.get('password')
+        # check if the user mobile or password were entered or not
+        if not mobile and not password :
+            return Response(data={"detail" : "mobile number and password are missing"} , status=status.HTTP_400_BAD_REQUEST)
+        if mobile is None:
+            return Response(data={"detail" : "mobile number is missing"} , status=status.HTTP_400_BAD_REQUEST)
+        if password is None:
+               return Response(data={"detail" : "password is missing"} , status=status.HTTP_400_BAD_REQUEST)
+
+        sign_in = signin_user_wp(mobile , password , request)
+        if isinstance(sign_in , Response) :
+            return sign_in
+        return Response(status=HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+
+# add/update credentials info
+class UpdateCredential(APIView) :
+    """Update user password"""
+    permission_classes = [IsAuthenticated]
+    @update_credential_document
+    def patch(self , request):
+        user = request.user
+        old_password = request.data.get("old_password")
+        new_password = request.data.get('new_password')
+        confirm_password = request.data.get('confirm_password')       
+         
+        updated_pass = update_user_password(user , old_password , new_password , confirm_password)
+        if isinstance(updated_pass , Response) :
+            return updated_pass
+        return Response(status=HTTP_500_INTERNAL_SERVER_ERROR)
+ 
+
+
+
+
+
+
