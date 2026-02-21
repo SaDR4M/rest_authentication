@@ -2,9 +2,9 @@
 import re
 import uuid
 # django & rest imports
-from django.contrib.auth.hashers import make_password
 from django.core.cache import cache
-from django.contrib.auth.hashers import make_password
+from django.contrib.auth.hashers import make_password, check_password
+from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.status import HTTP_200_OK , HTTP_400_BAD_REQUEST , HTTP_404_NOT_FOUND , HTTP_500_INTERNAL_SERVER_ERROR
@@ -16,15 +16,21 @@ from rest_framework.views import APIView
 # third party imports
 from icecream import ic
 # local imports
+from core.responses import ClientErrorResponse, ClientOkResponse
+from core.roles import ADMIN_ROLE
 from account.models import User
-from account.utils import  (signin_user ,
-                            signup_user ,
-                            check_otp ,
-                            signin_user_wp ,
-                            update_user_password,
-                            validate_user_mobile,
-                            create_otp
-                            )
+from account.utils import  (
+    signin_user ,
+    signup_user ,
+    check_otp ,
+    signin_user_wp ,
+    update_user_password,
+    validate_user_mobile,
+    create_otp,
+    create_token,
+    create_user_log
+)
+from account.serializers import UserSerializer, UserPasswordUpdateSerializer
 from notifications.models import SmsCategory
 from core.send_sms import send_sms
 from core.make_call import make_call
@@ -47,18 +53,27 @@ class UserOTPApiView(APIView):
         # filtering user
         # validate user mobile
         mobile = request.data.get("mobile")
-        validated_mobile = validate_user_mobile(mobile)
-        if isinstance(validate_user_mobile , Response) :
-            return validated_mobile
+        if not mobile:
+            return ClientErrorResponse.invalid_paramter()
+
+        try:
+            validated_mobile = validate_user_mobile(mobile)
+        except ValueError as e:
+            return ClientErrorResponse.invalid_paramter(
+                en_detail = 'Mobile is not correct',
+                fa_detail = 'ساختار شماره تلفن همراه نادرست است',
+            )
     
         with_call = False
         if request.data.get("with_call") == 'true':
             with_call = True      
 
         # create otp
-        otp = create_otp(mobile)
-        if isinstance(otp , Response) :
-            return otp
+        created, otp = create_otp(mobile)
+        if not created:
+            return ClientErrorResponse.invalid_paramter(
+                fa_detail = f"زمان باقی مانده {cache.ttl(key)}",
+            )
         
         # TODO Security: Dont send code in response
         req = {
@@ -67,34 +82,20 @@ class UserOTPApiView(APIView):
             "code" : otp,
         }  
 
-        # call for the OTP
-        if with_call == True:
-            req.update({
-                "send_with" : "CALL"
-                })
-            make_call(
-                receptor = mobile,
-                message = otp,
-            )
         # send message for OTP
-        else:
-            # NOTE create sms category objects otherwise it will cause an error
-            # FIXME fix this
-            # sms_category_obj = SmsCategory.objects.filter(code=1).first()
-            
-            # if sms_category_obj.isActive == True:
-            #     sms_text = sms_category_obj.smsText.format(otp,otp)
-            #     send_sms(
-            #         request.data.get("mobile"),
-            #         sms_text,
-            #         sms_category_obj.id,
-            #         sms_category_obj.get_sendByNumber_display(),
-            #         request.user.id,
-            #     )
-            req.update({
-                "send_with": 'SMS',
-                })
-        # TODO remove code from response
+        # NOTE create sms category objects otherwise it will cause an error
+        # FIXME fix this
+        # sms_category_obj = SmsCategory.objects.filter(code=1).first()
+        
+        # if sms_category_obj.isActive == True:
+        #     sms_text = sms_category_obj.smsText.format(otp,otp)
+        #     send_sms(
+        #         request.data.get("mobile"),
+        #         sms_text,
+        #         sms_category_obj.id,
+        #         sms_category_obj.get_sendByNumber_display(),
+        #         request.user.id,
+        #     )
         user_exists = User.objects.filter(mobile=mobile).exists()
         req.update({
             "user_exists" : user_exists,
@@ -103,9 +104,9 @@ class UserOTPApiView(APIView):
         })
         ic(req)
         # save OTP
-        hashed_otp =  make_password(otp)
-        cache.set(f'OTP:{mobile}', hashed_otp, 60)
-        return Response(req, status=HTTP_200_OK)
+        hashed_otp =  make_password(str(otp))
+        cache.set(f'OTP:{mobile}', hashed_otp, 120)
+        return ClientOkResponse.ok_with_data(data=req)
     
     
     
@@ -119,31 +120,40 @@ class SignInApiView(APIView):
         ''' login/sign up'''
         mobile = request.data.get("mobile")
         otp = request.data.get('otp')
+        if not mobile or not otp:
+            return ClientErrorResponse.invalid_paramter()
+
         is_otp_correct = check_otp(mobile , otp)
-        # if otp is not correct return response
-        if isinstance(is_otp_correct , Response) :
-            return is_otp_correct
-        try :
-            user = User.objects.get(
-                mobile = mobile
+        if not is_otp_correct:
+            return ClientErrorResponse.invalid_paramter(
+                en_detail = "Get OTP code again.",
+                fa_detail = "مجدد درخواست کد دو عاملی داده شود", 
             )
+
+        try :
+            user = User.get_user_with_mobile(mobile=mobile)
         except User.DoesNotExist :
             return Response(
                 data = {"en_detail" : "user does not exist" , "fa_detail" : "کاربر وجود ندارد"},
                 status=HTTP_404_NOT_FOUND
             )
+
         # sign in the user
-        response = signin_user(request , user)
-        
+        tokens = signin_user(request , user)
+        user_serialized = UserSerializer(
+            user,
+            data ={"last_login": timezone.now()},
+            partial=True,
+        )
+        if not user_serialized.is_valid():
+            return validation_error(user_serialized)
+        user_serialized.save()
+
         # delete OTP cache if it is not expired yet
         if cache.get(f"OTP:{mobile}") : 
             cache.delete(f"OTP:{mobile}")
             
-        return response                
-
-
-
-
+        return ClientOkResponse.ok_with_data(data=tokens)                
 
 
 class SignUpApiView(APIView):
@@ -156,22 +166,58 @@ class SignUpApiView(APIView):
         ''' login/sign up'''
         mobile = request.data.get("mobile")
         otp = request.data.get('otp')
-        is_otp_correct = check_otp(mobile , otp)
+        password = request.data.get("password")
         # if otp is not correct return response
-        if isinstance(is_otp_correct , Response) :
-            return is_otp_correct
-        
+        if not check_otp(mobile, otp):
+            return ClientErrorResponse.invalid_paramter(
+                en_detail = "Get OTP code again.",
+                fa_detail = "مجدد درخواست کد دو عاملی داده شود", 
+            )
+
         # sign up the user
-        response = signup_user(request)
+        if User.user_exist(mobile):
+            return Response(
+                data={
+                    "en_detail" : "user exists" ,
+                    "fa_detail" : "کاربری با این مشخصات وجود دارد"
+                } , 
+                status=HTTP_400_BAD_REQUEST
+            )
+
+        # validate user password
+        if not User.objects.is_password_valid(password):
+            return ClientErrorResponse.invalid_paramter(
+                fa_detail="پسورد معتبر نمیباشد"
+            )
         
+        # NOTE becareful with role if client pass ADMIN role the ADMIN user will be created
+        hashed_password = make_password(password)
+        request.data.update({
+            "password": hashed_password,
+            "last_login": timezone.now()
+        })
+
+        user_serialized = UserSerializer(data=request.data)
+        if not user_serialized.is_valid():
+            return validation_error(user_serialized)
+
+        # create user instance 
+        user_obj = user_serialized.save()  
+        # create log for LOGIN
+        create_user_log(user_obj, request, kind=0)
+            
+        # TODO Security:  dont send Authorization TOKEN
+        response_json = {
+            "succeeded": True,
+        }
+            
+        if role == ADMIN_ROLE :
+            return Response(status=403)
+
         # delete OTP cache if it is not expired yet
-        if cache.get(f"OTP:{mobile}") : 
-            cache.delete(f"OTP:{mobile}")
+        cache.delete(f"OTP:{mobile}")
             
         return response                
-
-
-
 
 # sign in the user with password
 class SignInWithPassApiView(APIView):
@@ -191,39 +237,82 @@ class SignInWithPassApiView(APIView):
         password = request.data.get('password')
         # check if the user mobile or password were entered or not
         if not mobile and not password :
-            return Response(data={"detail" : "mobile number and password are missing"} , status=status.HTTP_400_BAD_REQUEST)
-        if mobile is None:
-            return Response(data={"detail" : "mobile number is missing"} , status=status.HTTP_400_BAD_REQUEST)
-        if password is None:
-               return Response(data={"detail" : "password is missing"} , status=status.HTTP_400_BAD_REQUEST)
+            return ClientErrorResponse.invalid_paramter()
 
-        sign_in = signin_user_wp(mobile , password , request)
-        if isinstance(sign_in , Response) :
-            return sign_in
+        if not User.user_exist():
+            return ClientErrorResponse.not_found(
+                en_detail = "Invalid mobile or password" ,
+                fa_detail = "شماره یا رمز وارد شده اشتباه است"
+            )
+
+        user = User.get_user_with_mobile(mobile=mobile)
+        
+        if user is not None and user.password is not None:
+            if user.check_password(password):
+                # create user log
+                create_user_log(user , request , kind=0)
+                token = create_token(user)
+                return ClientOkResponse.ok_with_data(data=token)
+
+            # if password is wrong
+            return ClientErrorResponse.not_found(
+                en_detail = "Invalid mobile or password" ,
+                fa_detail = "شماره یا رمز وارد شده اشتباه است"
+            )
+        # if user exists but password is not set
+        if user is not None and user.password is None :
+            return ClientErrorResponse.invalid_paramter(
+                en_detail = "Password is not set for the account",
+                fa_detail = "رمز عبور برای اکانت تعیین نشده است"
+            )
+
         return Response(status=HTTP_500_INTERNAL_SERVER_ERROR)
-
-
 
 
 # add/update credentials info
 class UpdateCredential(APIView) :
     """Update user password"""
     permission_classes = [IsAuthenticated]
+
     @update_credential_document
     def patch(self , request):
         user = request.user
-        old_password = request.data.get("old_password")
-        new_password = request.data.get('new_password')
-        confirm_password = request.data.get('confirm_password')       
-         
-        updated_pass = update_user_password(user , old_password , new_password , confirm_password)
-        if isinstance(updated_pass , Response) :
-            return updated_pass
-        return Response(status=HTTP_500_INTERNAL_SERVER_ERROR)
- 
 
+        serializer = PasswordUpdateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return ClientErrorResponse.invalid_paramter()
 
+        if not check_password(old_password , user.password) :
+            return ClientErrorResponse.invalid_paramter(
+                en_detail = "Invalid password",
+                fa_detail = "پسورد وارد شده نامعتبر است"
+            )
+            
+        # check passwords match or not
+        if new_password != confirm_password:
+            return ClientErrorResponse.invalid_paramter(
+                en_detail = "password must match",
+                fa_detail = "پسوردهای وارد شده مطابقت ندارند",
+            )
 
+        # user cannot set the old password as new password
+        if old_password == new_password :
+            return ClientErrorResponse.invalid_paramter(
+                en_detail = "current password cannot be set as new password",
+                fa_detail = "پسورد فعلی به عنوان پسورد جدید مورد قبول نمی باشد"
+            )
 
+        # if something went wrong for the password validation
+        if not User.objects.is_password_valid(new_password):
+            return ClientErrorResponse.invalid_paramter(
+                fa_detail="پسورد معتبر نمی باشد",
+                en_detail="Password is not valid"
+            )
 
-
+        # update user password
+        user.set_password(new_password)
+        user.save()
+        return ClientOkResponse.ok(
+            en_detail = "password changed successfully",
+            fa_detail = "پسورد با موفقیت تغییر کرد"
+        )

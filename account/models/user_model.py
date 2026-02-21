@@ -3,13 +3,10 @@ from django.db import models
 from django.contrib.auth.models import AbstractBaseUser
 from django.utils.translation import gettext_lazy as _
 # local imports
-from account.models.managers import UserManager
-
-
-
-
+from account.models.managers import UserManager, UserQuerySet
 
 # Create your models here.
+
 class User(AbstractBaseUser):
     '''
     Base User Class Model
@@ -38,35 +35,6 @@ class User(AbstractBaseUser):
         choices=role_choices,
         help_text='handling the user role'
     ) 
-    """NOTE for future plans"""
-    # plan_choices = (
-    #     (0, "Have not active plan"),
-    #     (1, "Have a active Plan"),
-    #     (2, "Plan Expired"),
-    # )
-    # plan_status = models.SmallIntegerField(
-    #     default=0,
-    #     choices=plan_choices,
-    #     help_text='handling the user plan status'
-    # )    
-
-    # last_plan = models.ForeignKey(
-    #     'Membership',
-    #     on_delete=models.CASCADE,
-    #     blank=True,
-    #     null=True,
-    #     related_name='user_active_plan', 
-    #     help_text='last plan (active or expired)'
-    # ) 
-
-    # plans = models.ManyToManyField(
-    #     PricingPlan,
-    #     through='Membership',
-    #     blank=True,
-    #     help_text="All of my plans",
-    #     related_name="plans_set",
-    #     related_query_name="plans",
-    # )
     email = models.EmailField(blank = True, null = True,)
     name = models.CharField(
         max_length=100,
@@ -143,9 +111,10 @@ class User(AbstractBaseUser):
         'self', null=True, blank=True, on_delete=models.CASCADE) 
 
     USERNAME_FIELD = 'username'
-    REQUIRED_FIELDS = []
+    REQUIRED_FIELDS : list = []
     
-    objects = UserManager()
+    # objects = UserManager() 
+    objects = UserQuerySet.as_manager()
     
     def __str__(self):
         # empty string to prevent empty values
@@ -154,9 +123,13 @@ class User(AbstractBaseUser):
         family_name = str(self.family_name) if self.family_name is not None else ''
         return mobile +' - '+ name +' '+ family_name
     
+    @staticmethod
+    def get_user_with_mobile(mobile: str):
+        return User.objects.get(mobile=mobile)
         
-        
-        
+    @staticmethod
+    def user_exist(mobile: str):
+        return User.objects.filter(mobile=mobile).exists()
 
     
 

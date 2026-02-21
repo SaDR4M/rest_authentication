@@ -1,8 +1,19 @@
 # django imports
+from django.db.models import QuerySet
 from django.contrib.auth.base_user import BaseUserManager
 from django.utils.translation import gettext_lazy as _
+from rest_framework.validators import ValidationError
+from django.contrib.auth.password_validation import validate_password
 
+class UserQuerySet(QuerySet):
 
+    @staticmethod
+    def is_password_valid(password: str):
+        try :
+            validate_password(password)
+        except ValidationError as e:
+            return False
+        return True
 class UserManager(BaseUserManager):
     """
     Custom user model manager where mobile is the unique identifiers
