@@ -25,6 +25,7 @@ class BaseResponse:
                 "show": show,
                 "fa_detail": fa_detail,
                 "en_detail": en_detail,
+                "data": data,
             },
             status = status
         )
