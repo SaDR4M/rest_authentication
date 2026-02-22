@@ -66,6 +66,8 @@ class ErrorsEnum(Enum):
     NOT_FOUND_FA = "یافت نشد"
     NOT_FOUND_EN = "Not found"
     
+    SERIALIZER_ERROR_FA = "خطای اعتبار سنجی"
+    SERIALIZER_ERROR_EN = "Validation error"
 
 class ClientErrorResponse:
     
@@ -92,5 +94,15 @@ class ClientErrorResponse:
         )
 
 
-   
+    @classmethod
+    def serializer_error(cls, show: bool = True, fa_detail: str = "", en_detail: str = ""):
+        return BaseResponse.base_response(
+            succeeded=cls.SUCCEEDED,
+            show=show,
+            fa_detail=fa_detail if fa_detail else ErrorsEnum.SERIALIZER_ERROR_FA.value,
+            en_detail=en_detail if en_detail else ErrorsEnum.SERIALIZER_ERROR_EN.value,
+            status=400,
+        )
+    
+    
     
