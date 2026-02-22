@@ -278,30 +278,12 @@ class UpdateCredential(APIView) :
     def patch(self , request):
         user = request.user
 
-        serializer = PasswordUpdateSerializer(data=request.data)
+        serializer = UserPasswordUpdateSerializer(data=request.data , context = {"password" : user.password})
         if not serializer.is_valid():
-            return ClientErrorResponse.invalid_paramter()
+            ic(serializer.errors)
+            return ClientErrorResponse.serializer_error()
 
-        if not check_password(old_password , user.password) :
-            return ClientErrorResponse.invalid_paramter(
-                en_detail = "Invalid password",
-                fa_detail = "پسورد وارد شده نامعتبر است"
-            )
-            
-        # check passwords match or not
-        if new_password != confirm_password:
-            return ClientErrorResponse.invalid_paramter(
-                en_detail = "password must match",
-                fa_detail = "پسوردهای وارد شده مطابقت ندارند",
-            )
-
-        # user cannot set the old password as new password
-        if old_password == new_password :
-            return ClientErrorResponse.invalid_paramter(
-                en_detail = "current password cannot be set as new password",
-                fa_detail = "پسورد فعلی به عنوان پسورد جدید مورد قبول نمی باشد"
-            )
-
+        new_password = serializer.validated_data.get("new_password")
         # if something went wrong for the password validation
         if not User.objects.is_password_valid(new_password):
             return ClientErrorResponse.invalid_paramter(
