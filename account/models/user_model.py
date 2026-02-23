@@ -113,8 +113,8 @@ class User(AbstractBaseUser):
     USERNAME_FIELD = 'username'
     REQUIRED_FIELDS : list = []
     
-    # objects = UserManager() 
-    objects = UserQuerySet.as_manager()
+    objects = UserManager() 
+    # objects = UserQuerySet.as_manager()
     
     def __str__(self):
         # empty string to prevent empty values
@@ -123,13 +123,12 @@ class User(AbstractBaseUser):
         family_name = str(self.family_name) if self.family_name is not None else ''
         return mobile +' - '+ name +' '+ family_name
     
-    @staticmethod
-    def get_user_with_mobile(mobile: str):
-        return User.objects.get(mobile=mobile)
         
     @staticmethod
     def user_exist(mobile: str):
         return User.objects.filter(mobile=mobile).exists()
 
-    
+    def update_password(self, new_password: str) -> None:
+        self.set_password(new_password)
+        self.save()    
 

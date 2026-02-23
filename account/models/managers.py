@@ -7,13 +7,9 @@ from django.contrib.auth.password_validation import validate_password
 
 class UserQuerySet(QuerySet):
 
-    @staticmethod
-    def is_password_valid(password: str):
-        try :
-            validate_password(password)
-        except ValidationError:
-            return False
-        return True
+
+    pass
+
 class UserManager(BaseUserManager):
     """
     Custom user model manager where mobile is the unique identifiers
@@ -40,3 +36,6 @@ class UserManager(BaseUserManager):
         if extra_fields.get('is_superuser') is not True:
             raise ValueError(_('Superuser must have is_superuser=True.'))
         return self.create_user(mobile,  password, **extra_fields)
+
+    def get_user_with_mobile(self, mobile: str):
+        return self.get(mobile=mobile)

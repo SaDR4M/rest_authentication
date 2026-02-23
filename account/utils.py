@@ -180,3 +180,11 @@ def update_user_password(user:object , old_password:str , new_password:str , con
     """update user password"""
     # for password change
     # the old password and user password are not same
+
+
+def is_password_valid(password: str):
+    try :
+        validate_password(password)
+    except ValidationError:
+        return False
+    return True

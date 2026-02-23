@@ -1,5 +1,5 @@
-# django & rest imports 
 from django.contrib.auth.hashers import make_password, check_password
+# django & rest imports 
 from rest_framework.serializers import ModelSerializer, Serializer, CharField
 from rest_framework.validators import ValidationError
 # third party
@@ -70,3 +70,21 @@ class UserPasswordUpdateSerializer(Serializer):
             raise ValidationError("Current password cannot be set as new password")
 
         return super().validate(attrs=attrs)
+
+class ForgetPassSerializer(Serializer):
+    mobile = CharField(allow_blank=False)
+    new_password = CharField(allow_blank=False)
+    confirm_password = CharField(allow_blank=False)
+
+    class Meta:
+        fields = [
+            "new_password",
+            "confirm_password"
+        ]
+
+    def validate_confirm_password(self, value: str):
+
+        new_password = self.initial_data.get("new_password")
+        if new_password != value:
+            raise ValidationError("Confirm password must match with the password")
+            

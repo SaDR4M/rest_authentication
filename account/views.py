@@ -28,9 +28,10 @@ from account.utils import  (
     validate_user_mobile,
     create_otp,
     create_token,
-    create_user_log
+    create_user_log,
+    is_password_valid
 )
-from account.serializers import UserSerializer, UserPasswordUpdateSerializer
+from account.serializers import UserSerializer, UserPasswordUpdateSerializer, ForgetPassSerializer
 from notifications.models import SmsCategory
 from core.send_sms import send_sms
 from core.make_call import make_call
@@ -131,7 +132,7 @@ class SignInApiView(APIView):
             )
 
         try :
-            user = User.get_user_with_mobile(mobile=mobile)
+            user = User.objects.get_user_with_mobile(mobile=mobile)
         except User.DoesNotExist :
             return Response(
                 data = {"en_detail" : "user does not exist" , "fa_detail" : "کاربر وجود ندارد"},
@@ -185,7 +186,7 @@ class SignUpApiView(APIView):
             )
 
         # validate user password
-        if not User.objects.is_password_valid(password):
+        if not is_password_valid(password):
             return ClientErrorResponse.invalid_paramter(
                 fa_detail="پسورد معتبر نمیباشد"
             )
@@ -245,7 +246,7 @@ class SignInWithPassApiView(APIView):
                 fa_detail = "شماره یا رمز وارد شده اشتباه است"
             )
 
-        user = User.get_user_with_mobile(mobile=mobile)
+        user = User.objects.get_user_with_mobile(mobile=mobile)
         
         if user is not None and user.password is not None:
             if user.check_password(password):
@@ -285,7 +286,7 @@ class UpdateCredential(APIView) :
 
         new_password = serializer.validated_data.get("new_password")
         # if something went wrong for the password validation
-        if not User.objects.is_password_valid(new_password):
+        if not is_password_valid(new_password):
             return ClientErrorResponse.invalid_paramter(
                 fa_detail="پسورد معتبر نمی باشد",
                 en_detail="Password is not valid"
@@ -298,3 +299,30 @@ class UpdateCredential(APIView) :
             en_detail = "password changed successfully",
             fa_detail = "پسورد با موفقیت تغییر کرد"
         )
+
+
+class ForgetPassView(APIView):
+    permission_classes = [AllowAny]
+
+    def patch(self, request):
+
+        serializer = ForgetPassSerializer(data=request.data)
+        if not serializer.is_valid():
+            ic(serializer.errors)
+            return ClientErrorResponse.serializer_error()
+
+        new_password = serializer.validated_data.get("new_password")
+        user_mobile = serializer.validated_data.get("mobile")
+        if not is_password_valid(new_password):
+            return ClientErrorResponse.invalid_paramter(
+                fa_detail="پسورد معتبر نمی باشد",
+                en_detail="Invalid password"
+            )
+
+        user = User.objects.get_user_with_mobile(user_mobile)
+        user.update_password(new_password=new_password)
+
+        return ClientOkResponse.ok(
+            fa_detail="پسورد شما با موفقیت آپدیت شد"
+        )
+
