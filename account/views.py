@@ -73,7 +73,7 @@ class UserOTPApiView(APIView):
         created, otp = create_otp(mobile)
         if not created:
             return ClientErrorResponse.invalid_paramter(
-                fa_detail = f"زمان باقی مانده {cache.ttl(key)}",
+                fa_detail = f"زمان باقی مانده {otp}",
             )
         
         # TODO Security: Dont send code in response

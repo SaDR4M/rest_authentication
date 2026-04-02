@@ -59,17 +59,17 @@ class UserPasswordUpdateSerializer(Serializer):
         if not current_password:
             raise ValidationError("Password must be set")
 
-        if old_password != confirm_password:
+        if new_password != confirm_password:
             raise ValidationError("Passwords must match")
 
-        if not check_password(old_password , current_password) :
+        if old_password != current_password :
             raise ValidationError("Invalid password")
             
         # user cannot set the old password as new password
         if old_password == new_password :
             raise ValidationError("Current password cannot be set as new password")
 
-        return super().validate(attrs=attrs)
+        return super().validate(attrs=data)
 
 class ForgetPassSerializer(Serializer):
     mobile = CharField(allow_blank=False)
