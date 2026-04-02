@@ -1,11 +1,22 @@
+import re
 # django imports
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser
 from django.utils.translation import gettext_lazy as _
+from django.core.validators import ValidationError, RegexValidator
 # local imports
 from account.models.managers import UserManager, UserQuerySet
 
 # Create your models here.
+
+def validate_mobile(mobile: str):
+    # Regex for Persian mobile numbers (11 digits, starting with 09)
+    pattern = r'^09\d{9}$'
+    if not bool(re.match(pattern, mobile)):
+        raise ValidationError(
+            "Mobile number is not valid"
+        )
+        
 
 class User(AbstractBaseUser):
     '''
@@ -17,7 +28,12 @@ class User(AbstractBaseUser):
         null = True,
         unique=True,
     )
-    mobile = models.TextField(_('mobile number') ,  max_length=11 , unique=True)
+    mobile = models.CharField(
+        _('mobile number'),
+        max_length=11,
+        unique=True,
+        validators=[RegexValidator(regex=r'^09\d{9}$')]
+    )
 
     mobile_code = models.CharField(
         max_length=6,

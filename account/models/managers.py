@@ -4,10 +4,9 @@ from django.contrib.auth.base_user import BaseUserManager
 from django.core.validators import ValidationError
 from django.utils.translation import gettext_lazy as _
 from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 
 class UserQuerySet(QuerySet):
-
-
     pass
 
 class UserManager(BaseUserManager):
@@ -20,6 +19,7 @@ class UserManager(BaseUserManager):
         Create and save a User with the given mobile and password.
         """
         user = self.model(mobile=mobile, **extra_fields)
+        user.full_clean()
         user.set_password(password)
         user.save()
         return user
