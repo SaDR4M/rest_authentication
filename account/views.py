@@ -37,6 +37,7 @@ from core.send_sms import send_sms
 from core.make_call import make_call
 from account.docs import sign_in_otp_document , sign_up_document, sign_in_pass_document , update_credential_document , otp_document
 
+from core.ems import validation_error
 
 
 class UserOTPApiView(APIView):
@@ -141,6 +142,7 @@ class SignInApiView(APIView):
 
         # sign in the user
         tokens = signin_user(request , user)
+        ic(tokens)
         user_serialized = UserSerializer(
             user,
             data ={"last_login": timezone.now()},
@@ -193,12 +195,14 @@ class SignUpApiView(APIView):
         
         # NOTE becareful with role if client pass ADMIN role the ADMIN user will be created
         hashed_password = make_password(password)
-        request.data.update({
-            "password": hashed_password,
-            "last_login": timezone.now()
-        })
-
-        user_serialized = UserSerializer(data=request.data)
+        data_copy = request.data.copy()
+        data_copy.update(
+            {
+                "password": hashed_password,
+                "last_login": timezone.now()
+            }
+        )
+        user_serialized = UserSerializer(data=data_copy)
         if not user_serialized.is_valid():
             return validation_error(user_serialized)
 
@@ -207,18 +211,14 @@ class SignUpApiView(APIView):
         # create log for LOGIN
         create_user_log(user_obj, request, kind=0)
             
-        # TODO Security:  dont send Authorization TOKEN
-        response_json = {
-            "succeeded": True,
-        }
-            
-        if role == ADMIN_ROLE :
+        role = user_serialized.validated_data.get("role", None)
+        if role and role == ADMIN_ROLE :
             return Response(status=403)
 
         # delete OTP cache if it is not expired yet
         cache.delete(f"OTP:{mobile}")
             
-        return response                
+        return ClientOkResponse.ok()                
 
 # sign in the user with password
 class SignInWithPassApiView(APIView):

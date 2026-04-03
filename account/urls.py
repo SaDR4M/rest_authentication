@@ -6,8 +6,8 @@ from account.views import UserOTPApiView , SignInApiView , SignUpApiView, Update
 app_name = "account"
 urlpatterns = [
     path("get-otp/" , UserOTPApiView.as_view() , name="send_otp"),
-    path("login/" , SignInApiView.as_view() , name="authenticate"),
-    path("signup/" , SignUpApiView.as_view() , name="authenticate"),
+    path("login/" , SignInApiView.as_view() , name="login"),
+    path("signup/" , SignUpApiView.as_view() , name="signup"),
     path("update/", UpdateCredential.as_view(), name="update_data"),
     path("forget-pass/", ForgetPassView.as_view()),
 ]

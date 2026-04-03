@@ -42,19 +42,21 @@ def get_anonymous_user(User) :
     
     
 def create_user_log(user_obj, request, kind):
+
     ''' based on the action (login, wrong pass and ...) we create a log for user and save the ip address and user agent info'''
     
-    user_agent = request.headers.get("User-Agent")
+    user_agent = request.headers.get("User-Agent", "")
     user_agent_spilited = parse(user_agent)
     browser = f"by browser {user_agent_spilited.browser.family} / version {user_agent_spilited.browser.version_string}"
     os = f"by os {user_agent_spilited.os.family} / version {user_agent_spilited.os.version_string}"
     device = f"by device {user_agent_spilited.device.family} /brand {user_agent_spilited.device.brand} model {user_agent_spilited.device.model}"
     for_admin = str(user_agent_spilited)
-    x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+
+    x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR", "")
     if x_forwarded_for:
         ip = x_forwarded_for.split(",")[0]
     else:
-        ip = request.META.get("REMOTE_ADDR")
+        ip = request.META.get("REMOTE_ADDR", "")
 
     user_log = UserLog.objects.create(
         log_kind=kind,  # Wrong Password
